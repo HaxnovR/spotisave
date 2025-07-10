@@ -1,5 +1,20 @@
-# 🎧 Spotisave
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/e0fa1f38-f71b-496f-ac65-c08bf222382b" alt="Spotisave Banner" style="width:100%; max-height:220px; object-fit:cover;">
+</p>
 
+<h1 align="center">Spotisave</h1>
+
+<p align="center">
+  A command-line tool to download and backup public Spotify playlist metadata.
+</p>
+
+<p align="center">
+  <a href="#"><img alt="Version" src="https://img.shields.io/badge/version-1.0.0-blue.svg"></a>
+  <a href="#"><img alt="License" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
+  <a href="#"><img alt="Python" src="https://img.shields.io/badge/python-3.7+-yellow.svg"></a>
+</p>
+
+---
 **Spotisave** is a lightweight terminal-based tool that lets you download and back up metadata from any **public Spotify playlist** or all **public playlists of a Spotify user**.  
 All data is saved in CSV format by default, with an option to export as Excel.
 
