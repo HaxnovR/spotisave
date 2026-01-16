@@ -61,9 +61,21 @@ def download_spotify_cover(track_uri, tmp):
 
 def build_safe_filename(artist, title, ext):
     name = f"{artist} - {title}"
-    name = name.replace(":", "_").replace("/", "_")
-    name = "_".join(name.split())
+    name = name.replace(":", " ").replace("/", " ")
+    name = re.sub(r"\s+", " ", name).strip()
     return f"{name}.{ext}"
+
+def load_downloaded_uris(output_dir):
+    path = os.path.join(output_dir, ".downloaded_uris.txt")
+    if not os.path.exists(path):
+        return set()
+    with open(path, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f)
+
+def save_downloaded_uri(output_dir, uri):
+    path = os.path.join(output_dir, ".downloaded_uris.txt")
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(uri + "\n")
 
 
 # ---------------- GUI ----------------
@@ -323,6 +335,7 @@ class SpotiSaverApp:
             self.out_label.config(text=self.output_dir, fg="black")
             self.log(f"Output folder auto-created: {self.output_dir}")
 
+        self.downloaded_uris = load_downloaded_uris(self.output_dir)
         self.stop_event.clear()
         threading.Thread(target=self.run_dl, daemon=True).start()
 
@@ -332,21 +345,43 @@ class SpotiSaverApp:
 
     def run_dl(self):
         df = pd.read_csv(self.csv_path)
-        tracks = list(zip(df["Artist Name(s)"], df["Track Name"], df["Track URI"]))
-        self.dl_progress["maximum"] = len(tracks)
 
-        for i,(artist,title,uri) in enumerate(tracks,1):
-            if self.stop_event.is_set():
-                break
-            self.dl_status.set(f"{i}/{len(tracks)} {title}")
-            self.log(f"Downloading: {artist} - {title}")
-            self.download_track(artist, title, uri)
-            self.dl_progress["value"] = i
-
-        self.dl_status.set("Done")
+        total = len(df)
+        self.dl_progress["maximum"] = total
         self.dl_progress["value"] = 0
 
-    def download_track(self, artist, title, uri):
+        for i, (_, row) in enumerate(df.iterrows(), 1):
+            if self.stop_event.is_set():
+                self.dl_status.set("Cancelled")
+                break
+
+            title = row.get("Track Name", "")
+            self.dl_status.set(f"{i}/{total} {title}")
+
+            self.download_track(row.to_dict())
+
+            self.dl_progress["value"] = i
+
+        if not self.stop_event.is_set():
+            self.dl_status.set("Done")
+
+        self.dl_progress["value"] = 0
+
+
+
+
+    def download_track(self, row):
+        artist = row.get("Artist Name(s)", "")
+        title = row.get("Track Name", "")
+        album = row.get("Album Name", "")
+        uri = row.get("Track URI", "")
+        genres = row.get("Genres", "")
+        label = row.get("Record Label", "")
+        release_date = str(row.get("Release Date", ""))
+        year = release_date[:4] if release_date else ""
+        
+    
+
         fmt = self.format_var.get()
         bitrate = self.bitrate_var.get()
         overwrite = self.overwrite_var.get()
@@ -354,37 +389,68 @@ class SpotiSaverApp:
         filename = build_safe_filename(artist, title, fmt)
         out = os.path.join(self.output_dir, filename)
 
-        if overwrite == "skip" and os.path.exists(out):
-            self.log(f"Skipped (exists): {filename}")
+        if self.overwrite_var.get() == "skip" and uri in self.downloaded_uris:
+            self.log(f"Skipped (URI exists): {artist} - {title}")
             return
 
         with tempfile.TemporaryDirectory() as tmp:
+            audio_path = os.path.join(tmp, f"source.{fmt}")
             cmd = [
                 "yt-dlp",
-                "--extractor-args","youtube:music",
+                "--extractor-args", "youtube:music",
+                "--no-keep-video",
+                "--rm-cache-dir",
+                "--no-post-overwrites",
+                "--no-playlist",
+                "--no-warnings",
+                "--paths", tmp,
+                "-o", "source.%(ext)s",
                 f"ytsearch1:{artist} - {title}",
-                "-x","--audio-format",fmt,
-                "-o",os.path.join(tmp,"audio.%(ext)s")
+                "-x",
+                "--audio-format", fmt
             ]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-            audio = next(f for f in os.listdir(tmp) if f.startswith("audio."))
             cover = download_spotify_cover(uri, tmp)
 
             ff = [
-                "ffmpeg","-y",
-                "-i",os.path.join(tmp,audio),
-                "-i",cover,
-                "-map","0:a","-map","1:v",
-                "-c:a","copy","-c:v","mjpeg",
-                "-metadata:s:v","title=Album cover",
-                "-metadata:s:v","comment=Cover (front)"
+                "ffmpeg", "-y",
+                "-i", audio_path,
+                "-i", cover,
+                "-map", "0:a",
+                "-map", "1:v",
+                "-c:a", "copy",
+                "-c:v", "mjpeg",
+
+                # 🔽 Core metadata
+                "-metadata", f"title={title}",
+                "-metadata", f"artist={artist}",
+                "-metadata", f"album={album}",
+
+                # 🔽 Optional metadata (only if present)
+                "-metadata", f"date={release_date}" if release_date else "",
+                "-metadata", f"year={year}" if year else "",
+                "-metadata", f"genre={genres}" if genres else "",
+                "-metadata", f"publisher={label}" if label else "",
+
+                # 🔽 Traceability
+                "-metadata", f"comment=Spotify URI: {uri}",
+
+                # 🔽 Cover
+                "-metadata:s:v", "title=Album cover",
+                "-metadata:s:v", "comment=Cover (front)",
             ]
+
+            ff = [x for x in ff if x != ""]
             if fmt == "mp3":
                 ff += ["-id3v2_version","3"]
             ff.append(out)
             subprocess.run(ff, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.log(f"Finished: {artist} - {title}")
+            if not os.path.exists(out):
+                raise RuntimeError("Final output file was not created")
+
+        save_downloaded_uri(self.output_dir, uri)
+        self.downloaded_uris.add(uri)
 
 
 # ---------------- Run ----------------
