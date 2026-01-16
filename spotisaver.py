@@ -61,22 +61,9 @@ def download_spotify_cover(track_uri, tmp):
 
 def build_safe_filename(artist, title, ext):
     name = f"{artist} - {title}"
-    name = name.replace(":", " ").replace("/", " ")
+    name = re.sub(r'[\\/:*?"<>|]', ' ', name)  # Windows-illegal chars
     name = re.sub(r"\s+", " ", name).strip()
     return f"{name}.{ext}"
-
-def load_downloaded_uris(output_dir):
-    path = os.path.join(output_dir, ".downloaded_uris.txt")
-    if not os.path.exists(path):
-        return set()
-    with open(path, "r", encoding="utf-8") as f:
-        return set(line.strip() for line in f)
-
-def save_downloaded_uri(output_dir, uri):
-    path = os.path.join(output_dir, ".downloaded_uris.txt")
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(uri + "\n")
-
 
 # ---------------- GUI ----------------
 
@@ -335,7 +322,6 @@ class SpotiSaverApp:
             self.out_label.config(text=self.output_dir, fg="black")
             self.log(f"Output folder auto-created: {self.output_dir}")
 
-        self.downloaded_uris = load_downloaded_uris(self.output_dir)
         self.stop_event.clear()
         threading.Thread(target=self.run_dl, daemon=True).start()
 
@@ -379,7 +365,7 @@ class SpotiSaverApp:
         label = row.get("Record Label", "")
         release_date = str(row.get("Release Date", ""))
         year = release_date[:4] if release_date else ""
-        
+
     
 
         fmt = self.format_var.get()
@@ -389,8 +375,17 @@ class SpotiSaverApp:
         filename = build_safe_filename(artist, title, fmt)
         out = os.path.join(self.output_dir, filename)
 
-        if self.overwrite_var.get() == "skip" and uri in self.downloaded_uris:
-            self.log(f"Skipped (URI exists): {artist} - {title}")
+        fmt = self.format_var.get()
+        overwrite = self.overwrite_var.get()
+
+        artist = row.get("Artist Name(s)", "")
+        title = row.get("Track Name", "")
+
+        filename = build_safe_filename(artist, title, fmt)
+        out = os.path.join(self.output_dir, filename)
+
+        if overwrite == "skip" and os.path.exists(out):
+            self.log(f"Skipped (exists): {filename}")
             return
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -448,9 +443,6 @@ class SpotiSaverApp:
             self.log(f"Finished: {artist} - {title}")
             if not os.path.exists(out):
                 raise RuntimeError("Final output file was not created")
-
-        save_downloaded_uri(self.output_dir, uri)
-        self.downloaded_uris.add(uri)
 
 
 # ---------------- Run ----------------
