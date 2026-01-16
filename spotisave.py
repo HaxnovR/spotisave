@@ -6,6 +6,8 @@ from spotipy.oauth2 import SpotifyClientCredentials
 from dotenv import load_dotenv
 import os
 import string
+from spotipy.exceptions import SpotifyException
+
 
 # Load environment variables from .env
 load_dotenv()
@@ -30,26 +32,52 @@ def get_playlist_tracks(playlist_id):
     return tracks
 
 def extract_track_info(track_item):
-    try:
-        track = track_item.get('track') or {}
-        return {
-            "Track Name": track.get('name'),
-            "Artists": ', '.join(artist['name'] for artist in track.get('artists', [])) if track.get('artists') else None,
-            "Album": track.get('album', {}).get('name') if track.get('album') else None,
-            "Duration (ms)": track.get('duration_ms'),
-            "Popularity": track.get('popularity'),
-            "Track URL": track.get('external_urls', {}).get('spotify') if track.get('external_urls') else None
-        }
-    except Exception as e:
-        print(f"Error extracting track info: {e}")
-        return {
-            "Track Name": None,
-            "Artists": None,
-            "Album": None,
-            "Duration (ms)": None,
-            "Popularity": None,
-            "Track URL": None
-        }
+    track = track_item.get("track") or {}
+    if not track:
+        return {}
+
+    track_id = track.get("id")
+    album = track.get("album", {})
+    artists = track.get("artists", [])
+
+    # Audio features
+    features = {}
+
+
+
+    # Genres (merge all artist genres)
+    genres = set()
+    for artist in artists:
+        artist_data = sp.artist(artist["id"])
+        genres.update(artist_data.get("genres", []))
+
+    return {
+        "Track URI": track.get("uri"),
+        "Track Name": track.get("name"),
+        "Album Name": album.get("name"),
+        "Artist Name(s)": ", ".join(a["name"] for a in artists),
+        "Release Date": album.get("release_date"),
+        "Duration (ms)": track.get("duration_ms"),
+        "Popularity": track.get("popularity"),
+        "Explicit": track.get("explicit"),
+        "Added By": track_item.get("added_by", {}).get("id"),
+        "Added At": track_item.get("added_at"),
+        "Genres": ", ".join(genres),
+        "Record Label": album.get("label"),
+        "Danceability": 0,
+        "Energy": 0,
+        "Key": 0,
+        "Loudness": 0,
+        "Mode": 0,
+        "Speechiness": 0,
+        "Acousticness": 0,
+        "Instrumentalness": 0,
+        "Liveness": 0,
+        "Valence": 0,
+        "Tempo": 0,
+        "Time Signature": 0,
+    }
+
 
 def parse_playlist_id(url):
     match = re.search(r'playlist/([a-zA-Z0-9]+)', url)
