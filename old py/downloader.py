@@ -49,10 +49,11 @@ def download_spotify_cover(track_uri, temp_dir):
 
 class DownloaderGUI:
     def __init__(self, root):
+
         self.root = root
         self.root.title("CSV Audio Downloader (yt-dlp)")
-        self.root.geometry("600x400")
-        self.root.resizable(False, False)
+        self.root.geometry("600x520")
+        self.root.resizable(False, True)
 
         self.csv_path = None
         self.output_dir = None
@@ -81,6 +82,13 @@ class DownloaderGUI:
         # MP3 bitrate
         self.bitrate_frame = tk.Frame(frame)
         self.bitrate_frame.pack(anchor="w", pady=(6, 0))
+        # Overwrite / Skip option
+        tk.Label(frame, text="If file exists").pack(anchor="w", pady=(10, 2))
+        self.overwrite_var = tk.StringVar(value="skip")
+
+        tk.Radiobutton(frame, text="Skip existing", variable=self.overwrite_var, value="skip").pack(anchor="w")
+        tk.Radiobutton(frame, text="Overwrite", variable=self.overwrite_var, value="overwrite").pack(anchor="w")
+
         tk.Label(self.bitrate_frame, text="MP3 Bitrate").pack(side="left")
         self.bitrate_var = tk.StringVar(value="320")
         ttk.Combobox(
@@ -107,6 +115,8 @@ class DownloaderGUI:
 
         self.stop_btn = tk.Button(btn_frame, text="Stop / Cancel", width=18, height=2, command=self.stop, state="disabled")
         self.stop_btn.pack(side="left", padx=6)
+
+        self.root.update_idletasks()
 
     # -------- GUI actions --------
 
@@ -160,6 +170,8 @@ class DownloaderGUI:
             fmt = self.format_var.get()
             bitrate = self.bitrate_var.get()
 
+            overwrite_mode = self.overwrite_var.get()
+
             for i, (artist, title, track_uri) in enumerate(tracks, start=1):
                 if self.stop_event.is_set():
                     self.status.set("Cancelled")
@@ -168,7 +180,7 @@ class DownloaderGUI:
                 query = f"{artist} - {title}"
                 self.status.set(f"Downloading {i}/{total}: {title}")
 
-                self.download_track(query, track_uri, fmt, bitrate)
+                self.download_track(query, track_uri, fmt, bitrate, overwrite_mode)
 
                 self.progress["value"] = i
 
@@ -185,7 +197,14 @@ class DownloaderGUI:
             self.progress["value"] = 0
             self.stop_event.clear()
 
-    def download_track(self, query, track_uri, fmt, bitrate):
+    def download_track(self, query, track_uri, fmt, bitrate, overwrite_mode):
+
+        safe_name = f"{query}.{fmt}".replace("/", "_")
+        final_path = os.path.join(self.output_dir, safe_name)
+
+        if overwrite_mode == "skip" and os.path.exists(final_path):
+            return
+
         with tempfile.TemporaryDirectory() as tmp:
             # 1. Download audio (NO thumbnail)
             audio_out = os.path.join(tmp, "audio.%(ext)s")
@@ -218,10 +237,6 @@ class DownloaderGUI:
             if not cover_path:
                 shutil.copy(audio_path, self.output_dir)
                 return
-
-            # 3. Embed cover with ffmpeg (CORRECT)
-            final_name = f"{query}.{fmt}".replace("/", "_")
-            final_path = os.path.join(self.output_dir, final_name)
             
             ffmpeg_cmd = [
                 "ffmpeg",
