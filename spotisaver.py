@@ -18,6 +18,8 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from dotenv import load_dotenv
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 # ---------------- Spotify setup ----------------
 
 load_dotenv()
@@ -273,6 +275,19 @@ class SpotiSaverApp:
         )
         self.bitrate_box.pack(anchor="w", pady=4)
 
+        # Parallel downloads
+        tk.Label(self.right, text="Parallel downloads (Requires Good CPU and Network)").pack(anchor="w", pady=(10, 2))
+
+        self.parallel_var = tk.IntVar(value=1)
+        parallel_box = ttk.Combobox(
+            self.right,
+            textvariable=self.parallel_var,
+            values=[1, 2, 3, 4],
+            width=5,
+            state="readonly"
+        )
+        parallel_box.pack(anchor="w")
+
         tk.Label(self.right, text="If file exists").pack(anchor="w", pady=(6,0))
         self.overwrite_var = tk.StringVar(value="skip")
         tk.Radiobutton(self.right, text="Skip", variable=self.overwrite_var, value="skip").pack(anchor="w")
@@ -336,24 +351,39 @@ class SpotiSaverApp:
         self.dl_progress["maximum"] = total
         self.dl_progress["value"] = 0
 
-        for i, (_, row) in enumerate(df.iterrows(), 1):
-            if self.stop_event.is_set():
-                self.dl_status.set("Cancelled")
-                break
+        completed = 0
+        max_workers = int(self.parallel_var.get())
 
-            title = row.get("Track Name", "")
-            self.dl_status.set(f"{i}/{total} {title}")
+        self.log(f"Starting downloads with {max_workers} parallel workers")
 
-            self.download_track(row.to_dict())
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
 
-            self.dl_progress["value"] = i
+            for _, row in df.iterrows():
+                if self.stop_event.is_set():
+                    break
+                futures.append(
+                    executor.submit(self.download_track, row.to_dict())
+                )
+
+            for future in as_completed(futures):
+                if self.stop_event.is_set():
+                    break
+
+                try:
+                    future.result()
+                except Exception as e:
+                    self.log(f"ERROR: {e}")
+
+                completed += 1
+                self.dl_progress["value"] = completed
+                self.dl_status.set(f"{completed}/{total} completed")
 
         if not self.stop_event.is_set():
             self.dl_status.set("Done")
 
-        self.dl_progress["value"] = 0
-
-
+        self.start_btn.config(state="normal")
+        self.stop_btn.config(state="disabled")
 
 
     def download_track(self, row):
